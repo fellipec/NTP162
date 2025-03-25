@@ -1,3 +1,6 @@
+// Code from https://steemit.com/utopian-io/@lapilipinas/arduino-big-digits-0-99-with-i2c-16x2-lcd
+
+
 byte LT[8] =
 {
   B00111,
@@ -188,7 +191,6 @@ void custom0(int x){
     lcd.write(7);
   }
   void printDigits(int digits, int x){
-    // utility function for digital clock display: prints preceding colon and leading 0
     switch (digits) {
     case 0: 
       custom0(x);
