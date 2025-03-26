@@ -146,6 +146,8 @@ void setup() {
         Serial.print("Tentando conectar em ");
         Serial.print(ssids[i]);
         lcd.setCursor(0, 1);
+        lcd.print("              ");
+        lcd.setCursor(0, 1);
         lcd.print(ssids[i]);
         WiFi.begin(ssids[i], passwords[i]);
 

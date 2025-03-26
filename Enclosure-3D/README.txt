@@ -1,0 +1,1 @@
+Case for Arduino Uno, LCD Keypad Shield and Stepper Motor Driver by AndreySamokhin on Thingiverse: https://www.thingiverse.com/thing:4194107

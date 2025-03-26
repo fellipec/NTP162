@@ -1,5 +1,9 @@
 # NTP Clock with Weather Display for ESP8266
 
+![Clock working](clock1.jpg)
+
+---
+
 ## Overview
 
 This project uses an **ESP8266 microcontroller** (Wemos D1) to create a **Network Time Protocol (NTP) clock** with a **weather display**. The clock fetches the current time from an NTP server and displays it on a **16x2 LCD screen**. Additionally, it retrieves the weather information for a specified location (Curitiba) via the **wttr.in** service and displays the temperature and condition on the second line of the LCD. The device connects to Wi-Fi and syncs with an NTP server for time updates.
@@ -77,6 +81,14 @@ This project uses an **ESP8266 microcontroller** (Wemos D1) to create a **Networ
     - `D7` -> `D7`
   - **Button Pins**:
     - `A0` -> Button Input
+
+## 3D Printed Enclosure
+
+In the folder Enclosure-3D I included files for 3D printing a compatible case.
+Case for Arduino Uno, LCD Keypad Shield and Stepper Motor Driver by AndreySamokhin on Thingiverse: https://www.thingiverse.com/thing:4194107 and is licensed under Creative Commons - Attribution - Share Alike
+
+![Clock showing the weather](clock2.jpg)
+
 
 ## Troubleshooting
 
