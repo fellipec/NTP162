@@ -152,13 +152,14 @@ void setup() {
         WiFi.begin(ssids[i], passwords[i]);
 
         int tentativa = 0;
+        int j = 0;  // Index for the gizmo array
         // Retry connection up to 10 seconds (100 attempts)
         while (WiFi.status() != WL_CONNECTED && tentativa < 100) {
             delay(100);
             Serial.print(".");
             lcd.setCursor(15, 1);
-            lcd.print(gizmo[i]);  // Display some progress information
-            i = (i + 1) % 4;  // Cycle through the gizmo array
+            lcd.print(gizmo[j]);  // Display some progress information
+            j = (j + 1) % 4;  // Cycle through the gizmo array
             tentativa++;
         }
         
