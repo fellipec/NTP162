@@ -91,7 +91,11 @@ int ntpSrvIndex = 0; // Currently used NTP server
 // Keys and LCD Variables
 int buttonState = 0;
 const char* gizmo[] = {"|", ">", "=", "<"}; //Wi-Fi loading animation
-const char* daysOfTheWeek[7] = {"Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"};
+const char* daysOfTheWeek[7] = {"Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sab"};
+int counter = 0, lastCounter = 0;
+int maxUI = 4; // Number of screens
+int minUI = -1; // Number of screens
+unsigned long lastMillis = 0, lastUIMillis = 0; // Last time the screen was updated
 
 // Weather URL
 // Check https://github.com/chubin/wttr.in for instructions on how to
@@ -243,18 +247,18 @@ void printNumber(int val){
 /*
  * printTime() - Displays the current time on the LCD
  * 
- * It clears the display and prints hours and minutes using printDigits(), 
+ * Prints hours and minutes using printDigits(), 
  * placing colons at fixed positions to format the time.
  */
 
-void printTime(int h, int m) {
-    lcd.clear();
+void printTime(int h, int m, int s) {
+    char separator = (s % 2 == 0) ? ':' : ' ';
     printDigits(h / 10, 0);
     printDigits(h % 10, 4);
     lcd.setCursor(7, 0);
-    lcd.print(":");
+    lcd.print(separator);
     lcd.setCursor(7, 1);
-    lcd.print(":");
+    lcd.print(separator);
     printDigits(m / 10, 8);
     printDigits(m % 10, 12);
 }
@@ -422,20 +426,7 @@ int countBlink = 0;
 // *************
 void loop()
 {
-    timeClient.update();
-    if (!timeClient.isTimeSet()) {
-        Serial.println("Erro ao atualizar o tempo.");
-        int n = tryNTPServer();
-        if (n < 0) {
-            lcd.clear();
-            lcd.print("Erro ao conectar NTP");
-            delay(10000);
-            ESP.restart();
-        }
-    }
-    int hours = timeClient.getHours();
-    int minutes = timeClient.getMinutes();
-    
+
     // Uncomment the following lines to get the value of the analog pin
     // into the serial monitor, to adjust the function button
     // int x = analogRead(BUTTON);
@@ -444,49 +435,92 @@ void loop()
     // Reads the buttons and take action if some is pressed
     int buttonState = button(analogRead(BUTTON));
     if (buttonState == 1) {
+        lastUIMillis = millis();
         Serial.println("Select");
     }
     else if (buttonState == 2) {
+        lastUIMillis = millis();
         Serial.println("Left");
-        printNetwork();
-        lastMinutes = 0;
-    }
-    else if (buttonState == 3) {
-        Serial.println("Down");
-        printNTP();
-        lastMinutes = 0;
-    }
-    else if (buttonState == 4) {
-        Serial.println("Up");
-        printDate();
-        lastMinutes = 0;
-    }
-    else if (buttonState == 5) {
-        Serial.println("Right");
-        printWeather();
-        lastMinutes = 0;
-    }
-    else { // No button is pressed
-        if (hours != lastHours || minutes != lastMinutes) { // updates the LCD only if the time have changed
-            printTime(hours, minutes);
-            lastHours = hours;
-            lastMinutes = minutes;
+        counter--;
+        if (counter < minUI) {
+            counter = maxUI;
         }
     }
+    else if (buttonState == 3) {
+        lastUIMillis = millis();
+        Serial.println("Down");
+    }
+    else if (buttonState == 4) {
+        lastUIMillis = millis();
+        Serial.println("Up");
+    }
+    else if (buttonState == 5) {
+        lastUIMillis = millis();
+        Serial.println("Right");
+        counter++;
+        if (counter > maxUI) {
+            counter = minUI;
+        }
+    }
+    else { // No button is pressed
+    }
 
-    // Makes the : blink on the clock
-    delay(100);
-    countBlink++;
-    if (countBlink == 5) {
-        lcd.setCursor(7, 0);
-        lcd.print(":");
-        lcd.setCursor(7, 1);
-        lcd.print(":");
-    } else if (countBlink == 10) {
-        lcd.setCursor(7, 0);
-        lcd.print(" ");
-        lcd.setCursor(7, 1);
-        lcd.print(" ");
-        countBlink = 0;
+
+    if (millis() - lastMillis > 1000) {
+        lastMillis = millis();
+
+        timeClient.update();
+        if (!timeClient.isTimeSet()) {
+            Serial.println("Erro ao atualizar o tempo.");
+            int n = tryNTPServer();
+            if (n < 0) {
+                lcd.clear();
+                lcd.print("Erro ao conectar NTP");
+                delay(10000);
+                ESP.restart();
+            }
+        }
+
+
+        int hours = timeClient.getHours();
+        int minutes = timeClient.getMinutes();
+        int seconds = timeClient.getSeconds();
+
+        if (lastCounter != counter) {
+            lastCounter = counter;
+            lcd.clear();
+        }
+
+        if (millis() - lastUIMillis > 60000) {
+            counter = 0;
+        }
+
+        switch (counter)
+        {
+        case 0:            
+            printTime(hours, minutes, seconds);
+            break;
+
+        case -1:
+            printNetwork();
+            break;
+
+        case 1: 
+            printNTP();
+            break;
+        
+        case 2:
+            printDate();
+            break;
+        
+            case 3: 
+            printWeather();
+            break;
+        
+        default:
+            printTime(hours, minutes, seconds);
+            break;
+        }
+ 
     }
 }
