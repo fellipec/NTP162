@@ -270,10 +270,13 @@ void printTime(int h, int m, int s) {
  * It fetches the epoch time from the NTP client and calculates the date manually. 
  * The function then formats and prints the time, weekday, and date on the LCD.
  */
-
+unsigned long lastDateMillis = 0;
 void printDate() {
-    timeClient.update();
-    for (int i = 0; i < 10; i++){
+    if (millis() - lastDateMillis > 1000) {
+        lastDateMillis = millis();
+    
+        timeClient.update();
+        
         unsigned long epoch = timeClient.getEpochTime();
         
         // Calculates the time
@@ -303,15 +306,13 @@ void printDate() {
         // Finally, the days
         day += days;
 
-        // Show the results
-        lcd.clear();
+        // Show the results        
         lcd.setCursor(4, 0);
         lcd.printf("%02d:%02d:%02d ", hours, minutes, seconds);
         lcd.setCursor(1, 1);
         lcd.print(daysOfTheWeek[timeClient.getDay()]);
         lcd.print(" ");
-        lcd.printf("%02d/%02d/%04d", day, month, year);
-        delay(1000);
+        lcd.printf("%02d/%02d/%04d", day, month, year);        
     }
 }
 
@@ -323,14 +324,16 @@ void printDate() {
  * and the connected Wi-Fi SSID on the second row. The information 
  * is displayed for 5 seconds.
  */
-
+unsigned long lastNetworkMillis = 0;
 void printNetwork() {
-    lcd.clear();
-    lcd.setCursor(0, 0);
-    lcd.print(WiFi.localIP());
-    lcd.setCursor(0, 1);
-    lcd.print(WiFi.SSID());
-    delay(5000);
+    if (millis() - lastNetworkMillis > 10000) {
+        lastNetworkMillis = millis();
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print(WiFi.localIP());
+        lcd.setCursor(0, 1);
+        lcd.print(WiFi.SSID());
+    }
 }
 
 
