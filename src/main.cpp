@@ -181,6 +181,12 @@ int tryNTPServer() {
     return -1;
 }
 
+/*
+*  removeAccents() - Removes accents from a string
+*
+*  This function takes an UTF-8 string as input and removes any accents from the characters.
+*  It is necessary for the correct display of characters on the LCD.
+*/
 void removeAccents(char* str) {
     char* src = str;
     char* dst = str;
@@ -215,7 +221,14 @@ void removeAccents(char* str) {
     *dst = '\0'; // Termina a nova string
   }
   
-
+/*
+*  getScrollWindow() - Creates a scrolling window of characters
+*
+*  This function takes a source string and creates a scrolling window of characters
+*  with a specified width. The function wraps around the string if the position exceeds
+*  the length of the string. It fills the remaining space with spaces if the string is shorter
+*  than the specified width. The resulting string is stored in the destination buffer.
+*/
 void getScrollWindow(const char* src, char* dest, int pos, int width = 17) {
     int len = strlen(src);
     if (len == 0){
@@ -226,7 +239,7 @@ void getScrollWindow(const char* src, char* dest, int pos, int width = 17) {
     pos = pos % len; // Wraps around the scroll position
 
     for (int i = 0; i < width; i++) {
-      int idx = (pos + i) % (len);  // len + width for sliding effect
+      int idx = (pos + i) % (len);  // Wraps around the string
       if (idx < len) {
         dest[i] = src[idx];
       } else {
@@ -236,13 +249,21 @@ void getScrollWindow(const char* src, char* dest, int pos, int width = 17) {
     dest[width] = '\0';
   }
 
+/*
+*  upperFirstLetter() - Converts the first letter of a string to uppercase
+*/
 void upperFirstLetter(char* str) {
     if (str && str[0] != '\0') {  // Checks for empty string        
       str[0] = toupper(str[0]);  // Convert the first character to uppercase
     }
   }
 
-
+/*
+*   buildWeatherRequest() - Builds the HTTP request for current weather
+*   buildForecastRequest() - Builds the HTTP request for weather forecast
+*
+*  These functions create the HTTP GET request string for the OpenWeatherMap API.
+*/
 void buildWeatherRequest(char* request, const char* lat, const char* lon, const char* apiKey) {
     snprintf(request, MAX_REQUEST_SIZE, 
              "GET /data/2.5/weather?lat=%s&lon=%s&appid=%s&units=metric&lang=pt_br HTTP/1.1\r\n"
@@ -259,6 +280,12 @@ void buildForecastRequest(char* request, const char* lat, const char* lon, const
              lat, lon, apiKey);
 }
 
+
+/*
+*   getWeatherJSON() - Fetches weather data from OpenWeatherMap API
+*
+*  This function connects to the OpenWeatherMap API and retrieves the weather data
+*/
 void getWeatherJSON(bool forecast = false) {
     if (!client.connect("api.openweathermap.org", 443)) { 
         #ifdef SERIALPRINT
@@ -294,7 +321,7 @@ void getWeatherJSON(bool forecast = false) {
     // to avoid memory fragmentation
     unsigned int index = 0;
     unsigned long lastRead = millis();
-    while (millis() - lastRead < 2000) { // timeout de 2 segundos
+    while (millis() - lastRead < 2000) { // 2 second timeout
         while (client.available()) {            
             if (index < MAX_RESPONSE_SIZE - 1) {  // Buffer limit check
                 weatherJson[index++] = (char)client.read();  // Add the next character to the buffer
@@ -303,7 +330,7 @@ void getWeatherJSON(bool forecast = false) {
                 break;  // Buffer is full, stop reading
             }
         }
-        yield(); // tenta cooperar com o Wi-Fi
+        yield(); // try to play nice with the esp8266
     }
     weatherJson[index] = '\0';  // Add null terminator to the string
     #ifdef SERIALPRINT
@@ -326,7 +353,13 @@ void getWeatherJSON(bool forecast = false) {
 
 }
 
-
+/*
+*  getForecast() - Feches and deserialize weather forecast data from OpenWeatherMap API
+*
+*  This function checks if the forecast data is older than the fetch interval.
+*  If it is, it fetches the forecast data from the OpenWeatherMap API and
+*  deserializes the JSON response and updates the global forecast variables.
+*/
 void getForecast() {
     if ((timeClient.getEpochTime() - forecast_dt > FETCH_INTERVAL*4)) {
         forecast_dt = timeClient.getEpochTime();
@@ -374,7 +407,14 @@ void getForecast() {
 
 }
 
-
+/*
+*   getWeather() - Fetches current weather data from OpenWeatherMap API
+*
+*  This function checks if the current weather data is older than the fetch interval.
+*  If it is, it fetches the current weather data from the OpenWeatherMap API and
+*  deserializes the JSON response. It updates the global weather variables with the
+*  current weather information.
+*/
 void getWeather() {
     if (timeClient.getEpochTime() - current_dt > FETCH_INTERVAL) {
 
@@ -713,12 +753,10 @@ void printNTP() {
 
 
 /*
- * printWeather() - Fetches and displays weather information on the LCD
+ *   printWeather() - Prints the weather information on the LCD
  * 
- * If connected to Wi-Fi, it sends an HTTP GET request to retrieve weather data. 
- * If successful, the response is displayed on the LCD for 15 seconds. 
- * Otherwise, an error is logged to the serial monitor.
- * 
+ *   The weather information is scrolled on the second row of the LCD.
+ *   The first row shows the time the weather information was last updated.
  */
 unsigned long lastWeatherMillis = 0;
 void printWeather() {
@@ -750,7 +788,12 @@ void printWeather() {
 
 }
 
-
+/*
+*   printForecast() - Prints the weather forecast on the LCD
+*
+*   The forecast information is scrolled on the second row of the LCD.
+*   The first row shows the date and time of the forecast.
+*/
 void printForecast() {
     updateInterval = 500;
     if (millis() - lastWeatherMillis > updateInterval) {
@@ -805,14 +848,6 @@ void printForecast() {
     }
     return 0;
 }
-
-// Variables to hold status for the loop function
-int lastHours = 0;
-int lastMinutes = 0;
-int countBlink = 0;
-
-
-
 
 // *************
 // The main loop
