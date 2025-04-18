@@ -43,13 +43,18 @@ This project uses an **ESP8266 microcontroller** (Wemos D1) to create a **Networ
      - **NTPClient**
      - **LiquidCrystal**
    
-2. **Configure Wi-Fi Credentials**:
-   - Create a file named `wifi_credentials.h` and include it in the project.
+2. **Configure Wi-Fi Credentials and API Key**:
+   - Create a file named `wifi_credentials.h` in th include folder in the project.
    - Inside `wifi_credentials.h`, define your Wi-Fi SSID and password:
      ```cpp
      const char* ssids[] = { "YourWiFiSSID1", "YourWiFiSSID2" };
      const char* passwords[] = { "YourWiFiPassword1", "YourWiFiPassword2" };
-     ```
+
+    - Create a file named `apikeys.h` in the include folder in the project.
+    - Inside `apikeys.h` define the OpenWeatherMap API key:
+    ```cpp
+    #define OWM_APIKEY "xxxxxx" // Change for your API key
+    ```
    
 3. **Upload the Code**:
    - Open the Arduino IDE, select the **Wemos D1** board under **Tools** > **Board**.
@@ -60,14 +65,15 @@ This project uses an **ESP8266 microcontroller** (Wemos D1) to create a **Networ
    - The device will attempt to connect to one of the specified Wi-Fi networks and then synchronize with an NTP server to get the current time.
 
 5. **Weather Data**:
-   - The device fetches weather information from **wttr.in** for the city of Curitiba. You can modify the `weatherUrl` to change the location if desired.
+   - The device fetches weather information from **Open Weather Map** for the city of Curitiba. You can modify the `lat` and `lon` variables to change the location if desired.
 
 6. **Buttons**:
-   - Use the buttons on the LCD keypad shield to cycle through different screens:
+   - Use the **right** and **left** buttons on the LCD keypad shield to cycle through different screens:
      - **Network**: Displays IP address and connected Wi-Fi SSID.
      - **NTP**: Shows the current NTP server and synchronized time.
      - **Date**: Shows the current date and day of the week.
      - **Weather**: Displays the current temperature and weather condition.
+     - **Forecast**: Display the forecast for the next hours. While in the Forecast screen, use **Up** and **Down** to cycle through the forecast hours.
 
 ## Wiring
 
@@ -100,7 +106,7 @@ Case for Arduino Uno, LCD Keypad Shield and Stepper Motor Driver by AndreySamokh
   - If the NTP server connection fails, the device will attempt to connect to other predefined NTP servers. Ensure that the device has internet access.
 
 - **Weather Data Issues**:
-  - If the weather data is not displayed, check the Wi-Fi connection and ensure that the **wttr.in** URL is accessible.
+  - If the weather data is not displayed, check the Wi-Fi connection and ensure that the **Open Weather Map** API was supplied and the URL is accessible.
 
 ## License
 
@@ -110,7 +116,6 @@ This project is licensed under the **GNU General Public License (GPL)**. Feel fr
 
 - **ESP8266** library and documentation.
 - **LiquidCrystal** library for LCD display support.
-- **wttr.in** service for providing simple weather information.
 - **[steemit](https://steemit.com/utopian-io/@lapilipinas/arduino-big-digits-0-99-with-i2c-16x2-lcd)** for the example big number code
 - **[kolandor](https://github.com/kolandor/LCD-Keypad-Shield-Wemos-D1-Arduino-UNO)** - His code shows how to use the LCD Keypad Shield with thee Wemos D1. Even not using it directly, reading the source ended hours of frustrating debugging.
 

@@ -12,7 +12,7 @@
  *  - Synchronizes the time with an NTP server.
  *  - Displays the current time (hour, minute, second) on the LCD.
  *  - Displays the current date and day of the week.
- *  - Fetches and displays the current weather (temperature and condition) from wttr.in.
+ *  - Fetches and displays the current weather and forecast from OpenWeatherMap API.
  *  - Supports basic button inputs for navigating between different displays (Network, NTP, Date, Weather).
  * 
  * Hardware:
@@ -26,6 +26,8 @@
  *  - WiFiUdp.h
  *  - WiFiClientSecure.h
  *  - LiquidCrystal.h
+ *  - ArduinoJson.h
+ *  
  * 
  * The program is designed for a minimalistic setup, displaying key information while allowing
  * users to interact with the device via a button.
@@ -38,15 +40,18 @@
  * 
  */
 
-
-
 #include <ESP8266WiFi.h>              // Library for WiFi support on ESP8266
 #include <ESP8266HTTPClient.h>        // Library for HTTP requests
 #include <NTPClient.h>                // Library for NTP client functionality
 #include <WiFiUdp.h>                  // Library for UDP communication (used by NTPClient)
 #include <WiFiClientSecure.h>         // Library for secure HTTP (HTTPS) requests
 #include <LiquidCrystal.h>            // Library for controlling the LCD
+#include <ArduinoJson.h>              // Library for parsing JSON data
+
 #include <wifi_credentials.h>         // Custom header for storing WiFi credentials
+#include <apikeys.h>                  // Custom header for storing API keys
+
+#define SERIALPRINT // Uncomment to enable serial print debugging
 
 
 // The correct sequence of pins Wemos D1 similar to Arduino UNO
@@ -92,20 +97,63 @@ int ntpSrvIndex = 0; // Currently used NTP server
 int buttonState = 0;
 const char* gizmo[] = {"|", ">", "=", "<"}; //Wi-Fi loading animation
 const char* daysOfTheWeek[7] = {"Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sab"};
-int counter = 0, lastCounter = 0;
-int maxUI = 4; // Number of screens
-int minUI = -1; // Number of screens
+int counter = 0, lastCounter = 0, counterUD = 0, lastCounterUD = 0;
+int maxUI = 3; // Number of screens
+int minUI = -2; // Number of screens
 unsigned long lastMillis = 0, lastUIMillis = 0; // Last time the screen was updated
+unsigned int scrollPos = 0; // Position of the scrolling text
+char scrollBuffer[17]; // Buffer for scrolling text
+unsigned int updateInterval = 1000; // Update interval for the LCD
 
-// Weather URL
-// Check https://github.com/chubin/wttr.in for instructions on how to
-// format it
-const char* weatherUrl = "https://wttr.in/Curitiba?M&lang=pt&format=%t+%C";
+// OpenWeatherMap API
+const char* apiKey = OWM_APIKEY; // Change for your API key
+const char* lon = "-49.2908"; // Change coordinates for your city
+const char* lat = "-25.504";
+const int alt = 935; // Altitude in meters
+#define MAX_REQUEST_SIZE 512
+#define MAX_RESPONSE_SIZE 4096
+#define FETCH_INTERVAL 900 // Fetch weather data every 15 minutes
+char weatherJson[MAX_RESPONSE_SIZE];
+
+// Weather variables
+float tmp, hum, pres, calc_alt, qnh;
+float lastTemp = -1000, lastHum = -1000;
+float current_temp = 0.0;
+float current_feels_like = 0.0;
+float current_temp_min = 0.0;
+float current_temp_max = 0.0;
+int current_pressure = 0.0;
+int current_humidity = 0.0;
+char current_weatherDescription[21]; // 20 chars + '\0'
+char location_name[21]; // 20 chars + '\0'
+long current_sunset = 0;
+long current_sunrise = 0;
+long current_dt = 0;
+#define FORECAST_HOURS 8
+long forecast_dt = 0;
+struct Forecast {
+  long dt;
+  float temp;
+  float feels_like;
+  float temp_min;
+  float temp_max;
+  int pressure;
+  int humidity;
+  float pop;
+  float rain_3h;
+  char description[32];
+};
+
+Forecast forecast[FORECAST_HOURS];
+
+// Time Zone (UTC-3)
+const long utcOffsetInSeconds = -10800;
+
 
 // Network initialization
 WiFiUDP ntpUDP;
 WiFiClientSecure client;
-NTPClient timeClient(ntpUDP, ntpServers[0], -3 * 3600, 60000); // UTC-3 (Brasil)
+NTPClient timeClient(ntpUDP, ntpServers[0], utcOffsetInSeconds); // UTC-3 (Brasil)
 
 /*
  * tryNTPServer() - Tries to connect to a list of NTP servers
@@ -120,14 +168,280 @@ int tryNTPServer() {
         timeClient.setPoolServerName(ntpServers[i]);
         timeClient.begin();
         if (timeClient.update()) {
+            #ifdef SERIALPRINT
             Serial.println("Conexão com NTP bem-sucedida: " + String(ntpServers[i]));
+            #endif
             return i;
         } else {
+            #ifdef SERIALPRINT
             Serial.println("Erro ao conectar no NTP: " + String(ntpServers[i]));
+            #endif
         }
     }
     return -1;
 }
+
+void removeAccents(char* str) {
+    char* src = str;
+    char* dst = str;
+  
+    while (*src) {
+      // Se encontrar caractere UTF-8 multibyte (início com 0xC3)
+      if ((uint8_t)*src == 0xC3) {
+        src++;  // Avança para o próximo byte
+        switch ((uint8_t)*src) {
+          case 0xA0: case 0xA1: case 0xA2: case 0xA3: case 0xA4:  *dst = 'a'; break; // àáâãä
+          case 0x80: case 0x81: case 0x82: case 0x83: case 0x84:  *dst = 'A'; break; // ÀÁÂÃÄ
+          case 0xA7: *dst = 'c'; break; // ç
+          case 0x87: *dst = 'C'; break; // Ç
+          case 0xA8: case 0xA9: case 0xAA: case 0xAB: *dst = 'e'; break; // èéêë
+          case 0x88: case 0x89: case 0x8A: case 0x8B: *dst = 'E'; break; // ÈÉÊË
+          case 0xAC: case 0xAD: case 0xAE: case 0xAF: *dst = 'i'; break; // ìíîï
+          case 0x8C: case 0x8D: case 0x8E: case 0x8F: *dst = 'I'; break; // ÌÍÎÏ
+          case 0xB2: case 0xB3: case 0xB4: case 0xB5: case 0xB6: *dst = 'o'; break; // òóôõö
+          case 0x92: case 0x93: case 0x94: case 0x95: case 0x96: *dst = 'O'; break; // ÒÓÔÕÖ
+          case 0xB9: case 0xBA: case 0xBB: case 0xBC: *dst = 'u'; break; // ùúûü
+          case 0x99: case 0x9A: case 0x9B: case 0x9C: *dst = 'U'; break; // ÙÚÛÜ
+          case 0xB1: *dst = 'n'; break; // ñ
+          case 0x91: *dst = 'N'; break; // Ñ
+          default: *dst = '?'; break; // desconhecido
+        }
+        dst++;
+        src++; // Pula o segundo byte do caractere especial
+      } else {
+        *dst++ = *src++; // Copia byte normal
+      }
+    }
+    *dst = '\0'; // Termina a nova string
+  }
+  
+
+void getScrollWindow(const char* src, char* dest, int pos, int width = 17) {
+    int len = strlen(src);
+    if (len == 0){
+        dest[0] = '\0';  // Returns an empty string for empty source
+        return;
+    }
+    
+    pos = pos % len; // Wraps around the scroll position
+
+    for (int i = 0; i < width; i++) {
+      int idx = (pos + i) % (len);  // len + width for sliding effect
+      if (idx < len) {
+        dest[i] = src[idx];
+      } else {
+        dest[i] = ' ';  // Adds spaces for the remaining width
+      }
+    }
+    dest[width] = '\0';
+  }
+
+void upperFirstLetter(char* str) {
+    if (str && str[0] != '\0') {  // Checks for empty string        
+      str[0] = toupper(str[0]);  // Convert the first character to uppercase
+    }
+  }
+
+
+void buildWeatherRequest(char* request, const char* lat, const char* lon, const char* apiKey) {
+    snprintf(request, MAX_REQUEST_SIZE, 
+             "GET /data/2.5/weather?lat=%s&lon=%s&appid=%s&units=metric&lang=pt_br HTTP/1.1\r\n"
+             "Host: api.openweathermap.org\r\n"
+             "Connection: close\r\n\r\n", 
+             lat, lon, apiKey);
+}
+
+void buildForecastRequest(char* request, const char* lat, const char* lon, const char* apiKey) {
+    snprintf(request, MAX_REQUEST_SIZE, 
+             "GET /data/2.5/forecast?lat=%s&lon=%s&cnt=8&appid=%s&units=metric&lang=pt_br HTTP/1.1\r\n"
+             "Host: api.openweathermap.org\r\n"
+             "Connection: close\r\n\r\n", 
+             lat, lon, apiKey);
+}
+
+void getWeatherJSON(bool forecast = false) {
+    if (!client.connect("api.openweathermap.org", 443)) { 
+        #ifdef SERIALPRINT
+        Serial.println("Falha ao conectar ao servidor.");
+        #endif
+        return;
+    }
+    char req[MAX_REQUEST_SIZE];
+    if (forecast) {
+        buildForecastRequest(req, lat, lon, apiKey);
+    } else {
+        buildWeatherRequest(req, lat, lon, apiKey);
+    }    
+    
+    #ifdef SERIALPRINT
+    Serial.println("Requisição:");
+    Serial.println(req);
+    #endif
+    client.print(req); 
+
+    unsigned long timeout = millis();
+    while (client.available() == 0) { 
+        if (millis() - timeout > 5000) { // 5 seconds timeout
+            #ifdef SERIALPRINT
+            Serial.println("Erro: Timeout.");
+            #endif
+            client.stop();
+            return;
+        }
+    }
+    // Payload buffer
+    // User this while loop to avoid the Strings object
+    // to avoid memory fragmentation
+    unsigned int index = 0;
+    unsigned long lastRead = millis();
+    while (millis() - lastRead < 2000) { // timeout de 2 segundos
+        while (client.available()) {            
+            if (index < MAX_RESPONSE_SIZE - 1) {  // Buffer limit check
+                weatherJson[index++] = (char)client.read();  // Add the next character to the buffer
+                lastRead = millis();  // Update last read time
+            } else {
+                break;  // Buffer is full, stop reading
+            }
+        }
+        yield(); // tenta cooperar com o Wi-Fi
+    }
+    weatherJson[index] = '\0';  // Add null terminator to the string
+    #ifdef SERIALPRINT
+    Serial.println("Resposta do servidor:");
+    Serial.print(weatherJson);
+    Serial.print("\n\n");
+    #endif
+
+    // Find the JSON start position
+    char* jsonStart = strchr(weatherJson, '{');  // First { character
+    if (jsonStart) {
+        // Copy the JSON part to the payload
+        strcpy(weatherJson, jsonStart);
+    } else {
+        #ifdef SERIALPRINT
+        Serial.println("Erro: JSON não encontrado na resposta.");
+        #endif
+        return;
+    }
+
+}
+
+
+void getForecast() {
+    if ((timeClient.getEpochTime() - forecast_dt > FETCH_INTERVAL*4)) {
+        forecast_dt = timeClient.getEpochTime();
+        getWeatherJSON(true);
+        
+        JsonDocument doc;
+
+        DeserializationError error = deserializeJson(doc, weatherJson, MAX_RESPONSE_SIZE);
+        
+        if (error) {
+            #ifdef SERIALPRINT
+            Serial.print(F("deserializeJson() failed: "));
+            Serial.println(error.f_str());
+            #endif
+            return;
+        }
+        
+        JsonArray list = doc["list"];
+        
+        for (int i = 0; i < FORECAST_HOURS; i++) {
+          JsonObject entry = list[i];
+          JsonObject main = entry["main"];
+          JsonObject weather0 = entry["weather"][0];
+          JsonObject rain = entry["rain"];
+          
+          forecast[i].dt = entry["dt"];
+          forecast[i].dt += utcOffsetInSeconds;
+          forecast[i].temp = main["temp"];
+          forecast[i].feels_like = main["feels_like"];
+          forecast[i].temp_min = main["temp_min"];
+          forecast[i].temp_max = main["temp_max"];
+          forecast[i].pressure = main["pressure"];
+          forecast[i].humidity = main["humidity"];
+          forecast[i].pop = entry["pop"];
+          forecast[i].rain_3h = rain["3h"] | 0.0;
+        
+          const char* desc = weather0["description"] | "";
+          strncpy(forecast[i].description, desc, sizeof(forecast[i].description));
+          forecast[i].description[sizeof(forecast[i].description) - 1] = '\0';
+          upperFirstLetter(forecast[i].description);
+        }
+        
+
+    }
+
+}
+
+
+void getWeather() {
+    if (timeClient.getEpochTime() - current_dt > FETCH_INTERVAL) {
+
+
+        getWeatherJSON(false);
+    
+        // JSON parsing   
+        JsonDocument doc;
+
+        DeserializationError error = deserializeJson(doc, weatherJson, MAX_RESPONSE_SIZE);
+
+        if (error) {
+            #ifdef SERIALPRINT
+            Serial.print(F("deserializeJson() failed: "));
+            Serial.println(error.f_str());
+            #endif
+            return;
+        }
+        
+        #ifdef SERIALPRINT
+        Serial.println("JSON parsed");
+        #endif
+        JsonObject weather_0 = doc["weather"][0];
+        const char* desc = weather_0["description"] | ""; 
+        strncpy(current_weatherDescription, desc, sizeof(current_weatherDescription)); // Copy string to avoid null pointer
+        current_weatherDescription[sizeof(current_weatherDescription) - 1] = '\0'; // add null terminator
+        upperFirstLetter(current_weatherDescription); // Capitalize first letter
+        const char* name = doc["name"] | "";
+        strncpy(location_name, name, sizeof(location_name)); // Copy string to avoid null pointer
+        location_name[sizeof(location_name) - 1] = '\0'; // add null terminator
+        upperFirstLetter(location_name); // Capitalize first letter
+
+        JsonObject main = doc["main"];
+        current_temp= main["temp"]; 
+        current_feels_like = main["feels_like"]; 
+        current_temp_min = main["temp_min"]; 
+        current_temp_max = main["temp_max"]; 
+        current_pressure = main["pressure"]; 
+        current_humidity = main["humidity"]; 
+        current_dt = doc["dt"];
+        current_dt += utcOffsetInSeconds;
+
+        JsonObject sys = doc["sys"];
+        current_sunset = sys["sunset"];
+        current_sunrise = sys["sunrise"];
+
+        
+        #ifdef SERIALPRINT
+        Serial.printf("Clima: %s\n", current_weatherDescription);
+        Serial.printf("Temp: %.1f C\n", current_temp);
+        Serial.printf("Min: %.1f C\n", current_temp_min);
+        Serial.printf("Max: %.1f C\n", current_temp_max);
+        Serial.printf("Sensação: %.1f C\n", current_feels_like);
+        Serial.printf("Umidade: %d%%\n", current_humidity);
+        Serial.printf("Pressão: %d hPa\n", current_pressure);
+        Serial.printf("Localização: %s\n", location_name);
+        Serial.printf("Data: %ld\n", current_dt);
+        Serial.printf("Nascer do sol: %ld\n", current_sunrise);
+        Serial.printf("Pôr do sol: %ld\n", current_sunset);
+        Serial.printf("Latitude: %s\n", lat);
+        Serial.printf("Longitude: %s\n", lon);
+        #endif
+        
+
+    }
+ 
+  }
 
 
 /*
@@ -144,15 +458,44 @@ void setup() {
     lcd.print("Conectando em:");
     
     bool conectado = false;  // Flag to track if Wi-Fi connection is successful
-    
+
+    WiFi.mode(WIFI_STA);
+    WiFi.disconnect(); // Limpa conexões anteriores
+    delay(100);
+    #ifdef SERIALPRINT
+    Serial.println("Escaneando redes...");
+    #endif
+    int n = WiFi.scanNetworks();
+    if (n == 0) {
+      #ifdef SERIALPRINT
+      Serial.println("Nenhuma rede encontrada.");
+      #endif
+      return;
+    }
+
     // Loop to attempt connection to each SSID in the list
     for (int i = 0; i < numRedes; i++) {
+        #ifdef SERIALPRINT
         Serial.print("Tentando conectar em ");
         Serial.print(ssids[i]);
+        #endif
         lcd.setCursor(0, 1);
         lcd.print("               ");
         lcd.setCursor(0, 1);
         lcd.print(ssids[i]);
+        bool found = false;
+        for (int j = 0; j < n; j++) {
+            if (WiFi.SSID(j) == ssids[i]) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            #ifdef SERIALPRINT
+            Serial.println(" - Rede não encontrada.");
+            #endif
+            continue;  // Skip to the next SSID if not found
+        }
         WiFi.begin(ssids[i], passwords[i]);
 
         int tentativa = 0;
@@ -160,7 +503,9 @@ void setup() {
         // Retry connection up to 10 seconds (100 attempts)
         while (WiFi.status() != WL_CONNECTED && tentativa < 100) {
             delay(100);
+            #ifdef SERIALPRINT
             Serial.print(".");
+            #endif
             lcd.setCursor(15, 1);
             lcd.print(gizmo[j]);  // Display some progress information
             j = (j + 1) % 4;  // Cycle through the gizmo array
@@ -169,7 +514,9 @@ void setup() {
         
         // If connected successfully to Wi-Fi
         if (WiFi.status() == WL_CONNECTED) {
+            #ifdef SERIALPRINT
             Serial.println("\nConectado!");
+            #endif
             lcd.clear();
             lcd.print("Conectado ao ");
             lcd.setCursor(0, 1);
@@ -178,7 +525,9 @@ void setup() {
             conectado = true;
             break;  // Exit loop if connection is successful
         } else {
+            #ifdef SERIALPRINT
             Serial.println("\nFalha ao conectar.");
+            #endif
         }
     }
 
@@ -228,6 +577,9 @@ void setup() {
     
     // Set SSL client to insecure mode (bypass certificate verification)
     client.setInsecure();
+
+    getForecast();  // Fetch weather forecast data
+    getWeather();  // Fetch current weather data
 }
 
 
@@ -252,6 +604,10 @@ void printNumber(int val){
  */
 
 void printTime(int h, int m, int s) {
+    counterUD = 0;
+    updateInterval = 1000;
+    scrollBuffer [0] = '\0'; // Clear the scroll buffer
+    scrollPos = 0; // Reset the scroll position
     char separator = (s % 2 == 0) ? ':' : ' ';
     printDigits(h / 10, 0);
     printDigits(h % 10, 4);
@@ -272,7 +628,7 @@ void printTime(int h, int m, int s) {
  */
 unsigned long lastDateMillis = 0;
 void printDate() {
-    if (millis() - lastDateMillis > 1000) {
+    if (millis() - lastDateMillis > 500) {
         lastDateMillis = millis();
     
         timeClient.update();
@@ -332,7 +688,7 @@ void printNetwork() {
         lcd.setCursor(0, 0);
         lcd.print(WiFi.localIP());
         lcd.setCursor(0, 1);
-        lcd.print(WiFi.SSID());
+        lcd.print(WiFi.SSID()); 
     }
 }
 
@@ -343,14 +699,14 @@ void printNetwork() {
  * It clears the LCD and prints the active NTP server on the first row. 
  * The second row continuously updates with the formatted time for 10 seconds.
  */
-
+unsigned long lastNTPMillis = 0;
 void printNTP() {
-    lcd.clear();
-    lcd.print(ntpServers[ntpSrvIndex]);
-    for (int i = 0; i < 100; i++){
+    if (millis() - lastNTPMillis > 1000) {
+        lastNTPMillis = millis();
+        lcd.setCursor(0, 0);
+        lcd.print(ntpServers[ntpSrvIndex]);
         lcd.setCursor(0, 1);
         lcd.print(timeClient.getFormattedTime());
-        delay(100);
     }
 }
 
@@ -364,33 +720,64 @@ void printNTP() {
  * Otherwise, an error is logged to the serial monitor.
  * 
  */
+unsigned long lastWeatherMillis = 0;
 void printWeather() {
-    // Clear the LCD and informs the weather is being fetched so the user knows
-    // the button press was recognized
-    lcd.clear();
-    lcd.print("Consultando");
-    lcd.setCursor(0,1);
-    lcd.print("o tempo...");
-    
-    if (WiFi.status() == WL_CONNECTED) {
-        HTTPClient http;
-        http.begin(client, weatherUrl);
+    updateInterval = 500;
+    if (millis() - lastWeatherMillis > updateInterval) {
+        lastWeatherMillis = millis();
+        char weather[100];
+        snprintf(weather, 
+            sizeof(weather), 
+            "%s - Temp: %.1fC - Humid: %d%% - Press: %dhPa   ", 
+            current_weatherDescription, 
+            current_temp, 
+            current_humidity, 
+            current_pressure);
+        #ifdef SERIALPRINT
+        Serial.println(weather);
+        #endif
+        removeAccents(weather);
+        getScrollWindow(weather, scrollBuffer, scrollPos);
+        time_t epoch = (time_t)current_dt;
+        struct tm timeinfo;
+        gmtime_r(&epoch, &timeinfo);
+        lcd.setCursor(0, 0);
+        lcd.printf("Hoje as %02d:%02d", timeinfo.tm_hour, timeinfo.tm_min);
+        lcd.setCursor(0, 1);
+        lcd.print(scrollBuffer);
+        scrollPos++;
+    }
 
-        int httpCode = http.GET();
-        if (httpCode == HTTP_CODE_OK) { // HTTP 200
-            String payload = http.getString();
-            Serial.println("Tempo: " + payload);
-            payload.replace("°", String((char)223)); // Changes the degree symbol to something the LCD can display
-            lcd.clear();
-            lcd.print(payload.substring(0, 16)); // Breaks the answer to the size of the LCD
-            lcd.setCursor(0, 1);
-            lcd.print(payload.substring(16));
-            delay(15000);
-        } else {
-            Serial.println("Falha ao obter dados.");
-            Serial.print(http.getString());
-        }
-        http.end();
+}
+
+
+void printForecast() {
+    updateInterval = 500;
+    if (millis() - lastWeatherMillis > updateInterval) {
+        lastWeatherMillis = millis();
+        char weather[100];
+        snprintf(weather, sizeof(weather),
+         "%s - Min: %.1fC Max: %.1fC - %.0f%% Chuva: %.1fmm  Humid: %d%% - Press: %dhPa   ",
+         forecast[counterUD].description,
+         forecast[counterUD].temp_min,
+         forecast[counterUD].temp_max,
+         forecast[counterUD].pop*100,
+         forecast[counterUD].rain_3h,
+         forecast[counterUD].humidity,
+         forecast[counterUD].pressure);
+        #ifdef SERIALPRINT
+        Serial.println(weather);
+        #endif
+        removeAccents(weather);
+        getScrollWindow(weather, scrollBuffer, scrollPos);
+        time_t epoch = (time_t)forecast[counterUD].dt;
+        struct tm timeinfo;
+        gmtime_r(&epoch, &timeinfo);
+        lcd.setCursor(0, 0);
+        lcd.printf("%02d/%02d - %02d:%02d", timeinfo.tm_mday, timeinfo.tm_mon+1,timeinfo.tm_hour, timeinfo.tm_min);
+        lcd.setCursor(0, 1);
+        lcd.print(scrollBuffer);
+        scrollPos++;
     }
 }
 
@@ -424,6 +811,9 @@ int lastHours = 0;
 int lastMinutes = 0;
 int countBlink = 0;
 
+
+
+
 // *************
 // The main loop
 // *************
@@ -436,45 +826,64 @@ void loop()
     // Serial.print(x);
 
     // Reads the buttons and take action if some is pressed
-    int buttonState = button(analogRead(BUTTON));
-    if (buttonState == 1) {
-        lastUIMillis = millis();
-        Serial.println("Select");
-    }
-    else if (buttonState == 2) {
-        lastUIMillis = millis();
-        Serial.println("Left");
-        counter--;
-        if (counter < minUI) {
-            counter = maxUI;
+    if (millis() - lastUIMillis > 666) {
+        int buttonState = button(analogRead(BUTTON));
+        
+        switch (buttonState) {
+            case 1:
+                #ifdef SERIALPRINT
+                Serial.printf("Select %d\n", counter);
+                #endif
+                break;
+
+            case 2:
+                counter--;
+                if (counter < minUI) {
+                    counter = maxUI;
+                }
+                #ifdef SERIALPRINT
+                Serial.printf("Left %d\n", counter);
+                #endif
+                break;
+
+            case 3:
+                counterUD--;
+                #ifdef SERIALPRINT
+                Serial.println("Down");
+                #endif
+                break;
+
+            case 4:
+                counterUD++;
+                #ifdef SERIALPRINT
+                Serial.println("Up");
+                #endif
+                break;
+
+            case 5:
+                counter++;
+                if (counter > maxUI) {
+                    counter = minUI;
+                }
+                #ifdef SERIALPRINT
+                Serial.printf("Right %d\n", counter);
+                #endif
+                break;
+
+            default:
+                // No button is pressed
+                break;
         }
     }
-    else if (buttonState == 3) {
-        lastUIMillis = millis();
-        Serial.println("Down");
-    }
-    else if (buttonState == 4) {
-        lastUIMillis = millis();
-        Serial.println("Up");
-    }
-    else if (buttonState == 5) {
-        lastUIMillis = millis();
-        Serial.println("Right");
-        counter++;
-        if (counter > maxUI) {
-            counter = minUI;
-        }
-    }
-    else { // No button is pressed
-    }
-
-
-    if (millis() - lastMillis > 1000) {
+    
+    if ((millis() - lastMillis > updateInterval) || (lastCounter != counter) || (lastCounterUD != counterUD) ) {
         lastMillis = millis();
 
         timeClient.update();
         if (!timeClient.isTimeSet()) {
+            #ifdef SERIALPRINT
             Serial.println("Erro ao atualizar o tempo.");
+            #endif
             int n = tryNTPServer();
             if (n < 0) {
                 lcd.clear();
@@ -491,7 +900,12 @@ void loop()
 
         if (lastCounter != counter) {
             lastCounter = counter;
+            lastUIMillis = millis();
             lcd.clear();
+        }
+        if (lastCounterUD != counterUD) {
+            lastCounterUD = counterUD;
+            lastUIMillis = millis();
         }
 
         if (millis() - lastUIMillis > 60000) {
@@ -504,21 +918,25 @@ void loop()
             printTime(hours, minutes, seconds);
             break;
 
+        case -2:
+            printNTP();
+
         case -1:
             printNetwork();
             break;
 
         case 1: 
-            printNTP();
-            break;
-        
-        case 2:
             printDate();
             break;
         
-            case 3: 
+        case 2: 
             printWeather();
             break;
+        
+        case 3:
+            printForecast();
+            break;
+        
         
         default:
             printTime(hours, minutes, seconds);
@@ -526,4 +944,8 @@ void loop()
         }
  
     }
+
+    getForecast();  // Fetch weather forecast data
+    getWeather();  // Fetch current weather data
+
 }
