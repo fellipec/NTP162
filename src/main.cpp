@@ -725,9 +725,8 @@ void printDate() {
  */
 unsigned long lastNetworkMillis = 0;
 void printNetwork() {
-    if (millis() - lastNetworkMillis > 10000) {
+    if (millis() - lastNetworkMillis > 1000) {
         lastNetworkMillis = millis();
-        lcd.clear();
         lcd.setCursor(0, 0);
         lcd.print(WiFi.localIP());
         lcd.setCursor(0, 1);
@@ -958,6 +957,7 @@ void loop()
 
         case -2:
             printNTP();
+            break;
 
         case -1:
             printNetwork();
