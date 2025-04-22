@@ -651,7 +651,7 @@ void printTime(int h, int m, int s) {
     updateInterval = 1000;
     scrollBuffer [0] = '\0'; // Clear the scroll buffer
     scrollPos = 0; // Reset the scroll position
-    char separator = (s % 2 == 0) ? ':' : ' ';
+    char separator = (s % 2 == 0) ? char(165) : ' ';
     printDigits(h / 10, 0);
     printDigits(h % 10, 4);
     lcd.setCursor(7, 0);
